@@ -22,8 +22,8 @@ Tehnika: üks staatiline leht (`index.html`, `app.js`) + Supabase (sisselogimine
 Supabase CLI-ga projekti kaustas:
 ```bash
 supabase login
-supabase link --project-ref SINU-PROJEKTI-REF
-supabase functions deploy update-prices
+supabase link --project-ref yvwqikzzfqxoavbaqmpv
+supabase functions deploy update-prices --no-verify-jwt
 ```
 Äpis nupp **Uuenda hindu** kutsub selle välja.
 
@@ -32,8 +32,8 @@ supabase functions deploy update-prices
 ```sql
 select cron.schedule('kasvukonto-hinnad', '*/30 7-21 * * 1-5', $$
   select net.http_post(
-    url := 'https://SINU-PROJEKT.supabase.co/functions/v1/update-prices',
-    headers := '{"Authorization": "Bearer SINU-ANON-VÕTI"}'::jsonb
+    url := 'https://yvwqikzzfqxoavbaqmpv.supabase.co/functions/v1/update-prices',
+    headers := '{"Authorization": "Bearer sb_publishable_A7OUEIta4yE3JRYOxkutyQ_DRCJaHwN", "apikey": "sb_publishable_A7OUEIta4yE3JRYOxkutyQ_DRCJaHwN"}'::jsonb
   );
 $$);
 ```

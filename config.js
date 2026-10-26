@@ -2,5 +2,5 @@
 // Anon-võti on mõeldud avalikuks kasutamiseks; andmeid kaitsevad andmebaasi reeglid (RLS).
 window.KASVUKONTO_CONFIG = {
   SUPABASE_URL: "https://yvwqikzzfqxoavbaqmpv.supabase.co",
-  SUPABASE_ANON_KEY: "SINU-ANON-VÕTI",
+  SUPABASE_ANON_KEY: "sb_publishable_A7OUEIta4yE3JRYOxkutyQ_DRCJaHwN",
 };
