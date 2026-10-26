@@ -1,4 +1,4 @@
-/* Kasvukonto – isiklik investeerimisäpp (Supabase) */
+/* Kasvukonto – isiklik investeerimisäpp (Supabase). Kasum arvutatakse tehingutest keskmise hinna meetodil. */
 const cfg = window.KASVUKONTO_CONFIG || {};
 const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
@@ -6,16 +6,19 @@ const TYPES = ["ETF", "Aktsia", "Fond", "Võlakiri", "Hoius", "Krüpto", "Muu"];
 const TYPE_COLOR = { ETF: "#1F6B4F", Aktsia: "#3E6FA3", Fond: "#5E9C8F", Võlakiri: "#B07F22", Hoius: "#8A8F3C", Krüpto: "#8E5BA6", Muu: "#7A7F7C" };
 const SAFE = ["Võlakiri", "Hoius"], DIVERSE = ["ETF", "Fond"];
 const KIND = { dividend: "Dividend", deposit: "Sissemakse", withdraw: "Väljamakse" };
-const S = { holdings: [], prices: {}, txns: [], config: { monthly: 300 } };
+const S = { holdings: [], trades: [], prices: {}, txns: [], config: { monthly: 300 }, hasTrades: true };
 let user = null;
 
 const $ = (id) => document.getElementById(id);
-const fmt = (n, d) => n.toLocaleString("et-EE", { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmt = (n, d) => (+n).toLocaleString("et-EE", { minimumFractionDigits: d, maximumFractionDigits: d });
 const eur = (n, d = 2) => (isFinite(n) ? fmt(n, d) + " €" : "–");
 const eur0 = (n) => eur(n, Math.abs(n) >= 1000 ? 0 : 2);
 const pct = (n, d = 1) => (isFinite(n) ? fmt(n, d) + " %" : "–");
-const sign = (n) => (n > 0 ? "+" : n < 0 ? "−" : "");
+const sign = (n) => (n > 0.004 ? "+" : n < -0.004 ? "−" : "");
+const qtyFmt = (q) => (+q).toLocaleString("et-EE", { maximumFractionDigits: 6 });
 const up = (t) => String(t || "").trim().toUpperCase();
+const today = () => new Date().toISOString().slice(0, 10);
+const dateEt = (d) => new Date(d).toLocaleDateString("et-EE", { day: "numeric", month: "short", year: "numeric" });
 function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -29,7 +32,6 @@ function el(tag, attrs = {}, ...kids) {
   return e;
 }
 
-/* Arvab hinnaallika sümboli ära, et kasutaja ei peaks seda teadma. */
 function guessSymbol(t, type) {
   t = up(t);
   if (!t || t.includes(".") || t.includes("-") || t.includes("=")) return t;
@@ -41,17 +43,7 @@ function guessSymbol(t, type) {
   return t;
 }
 
-/* ---------- andmed ---------- */
-const fromRow = (r) => ({
-  id: r.id, ticker: r.ticker, symbol: r.symbol, name: r.name, type: r.type,
-  qty: +r.qty, avgPrice: +r.avg_price, target: +r.target || 0,
-  nominal: r.nominal == null ? null : +r.nominal, rate: r.rate == null ? null : +r.rate, maturity: r.maturity || "",
-  manualPrice: r.manual_price == null ? null : +r.manual_price, manualAt: r.manual_price_at,
-  buyCurrency: r.buy_currency || "EUR", buyPrice: r.buy_price == null ? null : +r.buy_price,
-  buyFx: r.buy_fx == null ? null : +r.buy_fx, buyDate: r.buy_date || "",
-});
-
-/* Valuutakurss: mitu eurot saab 1 dollari eest antud päeval (ECB andmed, Frankfurter). */
+/* Dollari kurss (ECB andmed, Frankfurter): mitu eurot 1 $ eest. */
 const fxCache = {};
 async function usdToEur(date) {
   const key = date || "latest";
@@ -62,46 +54,89 @@ async function usdToEur(date) {
     async () => (await (await fetch(`https://api.frankfurter.app/${date || "latest"}?from=USD&to=EUR`)).json()).rates.EUR,
   ];
   for (const t of tries) {
-    try { const v = +(await t()); if (v > 0) return (fxCache[key] = v); } catch (_e) { /* proovi järgmist */ }
+    try { const v = +(await t()); if (v > 0) return (fxCache[key] = v); } catch (_e) { /* järgmine */ }
   }
   return null;
 }
+
+/* ---------- andmed ---------- */
+const fromRow = (r) => ({
+  id: r.id, ticker: r.ticker, symbol: r.symbol, name: r.name, type: r.type,
+  legacyQty: +r.qty, legacyAvg: +r.avg_price, target: +r.target || 0,
+  nominal: r.nominal == null ? null : +r.nominal, rate: r.rate == null ? null : +r.rate, maturity: r.maturity || "",
+  manualPrice: r.manual_price == null ? null : +r.manual_price, manualAt: r.manual_price_at,
+});
 async function loadAll() {
-  const [h, t, s, p] = await Promise.all([
+  const [h, t, s, p, tr] = await Promise.all([
     sb.from("holdings").select("*"),
     sb.from("txns").select("*"),
     sb.from("settings").select("*").maybeSingle(),
     sb.from("prices").select("*"),
+    sb.from("trades").select("*").order("date").order("created_at"),
   ]);
   const err = h.error || t.error || s.error || p.error;
   if (err) return toast("Andmete laadimine ebaõnnestus: " + err.message);
+  S.hasTrades = !tr.error;
+  if (tr.error) toast("Andmebaas vajab uuendust: käivita Supabase'is fail 002_trades.sql (juhend vestluses).");
   S.holdings = h.data.map(fromRow);
+  S.trades = (tr.data || []).map((x) => ({ ...x, qty: +x.qty, price: +x.price, fx: +x.fx || 1, fee: +x.fee || 0 }));
   S.txns = t.data.map((r) => ({ ...r, amount: +r.amount }));
   if (s.data) S.config.monthly = +s.data.monthly;
   S.prices = {};
-  p.data.forEach((r) => (S.prices[r.symbol] = { price: +r.price, at: r.updated_at, source: r.source }));
-  render();
+  p.data.forEach((r) => (S.prices[r.symbol] = { price: +r.price, at: r.updated_at, source: r.source, native: r.native_price == null ? null : +r.native_price, cur: r.native_currency }));
+render();
+  if (openDetailId) { const r = rows().list.find((x) => x.id === openDetailId); if (r && !$("d-view").hidden) fillDetail(r); }
 }
 let toastT;
-function toast(msg) { const n = $("db-notice"); n.textContent = msg; n.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (n.hidden = true), 8000); }
+function toast(msg) { const n = $("db-notice"); n.textContent = msg; n.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (n.hidden = true), 9000); }
 
-function priceInfo(h) {
+/* Positsioon tehingutest, keskmise hinna meetod (nagu maakleritel). Kõik summad eurodes. */
+function position(h) {
+  const list = S.trades.filter((t) => t.holding_id === h.id);
+  if (!S.hasTrades) {
+    const q = h.legacyQty || 0;
+    return { qty: q, cost: q * (h.legacyAvg || 0), realized: 0, fees: 0, trades: [] };
+  }
+  let qty = 0, cost = 0, realized = 0, fees = 0;
+  for (const t of list) {
+    const gross = t.qty * t.price * t.fx;
+    fees += t.fee;
+    if (t.side === "buy") { qty += t.qty; cost += gross + t.fee; }
+    else {
+      const avg = qty > 0 ? cost / qty : 0, q = Math.min(t.qty, qty);
+      realized += gross - t.fee - avg * q;
+      cost -= avg * q; qty -= q;
+    }
+  }
+  if (qty < 1e-9) { qty = 0; cost = 0; }
+  return { qty, cost, realized, fees, trades: list };
+}
+function priceInfo(h, avg) {
   if (h.type === "Hoius") return { price: 1, at: null, source: "hoius", has: true };
   const m = S.prices[up(h.symbol || h.ticker)];
   const manual = h.manualPrice != null ? { price: h.manualPrice, at: h.manualAt, source: "käsitsi", has: true } : null;
   if (m && (!manual || new Date(m.at) > new Date(manual.at))) return { ...m, has: true };
-  return manual || { price: h.avgPrice, at: null, source: "ostuhind", has: false };
+  return manual || { price: avg, at: null, source: "ostuhind", has: false };
 }
+function divsFor(h) { return S.txns.filter((t) => t.kind === "dividend" && t.ticker && up(t.ticker) === up(h.ticker)).reduce((a, t) => a + t.amount, 0); }
 function rows() {
-  const list = S.holdings.map((h) => {
-    const pi = priceInfo(h);
-    const value = h.qty * pi.price, cost = h.qty * h.avgPrice;
-    return { ...h, price: pi.price, pi, value, cost, pl: value - cost };
+  const all = S.holdings.map((h) => {
+    const pos = position(h);
+    const avgPrice = pos.qty ? pos.cost / pos.qty : 0;
+    const pi = priceInfo(h, avgPrice);
+    const value = pos.qty * pi.price;
+    return { ...h, ...pos, avgPrice, price: pi.price, pi, value, pl: value - pos.cost };
   });
+  const list = all.filter((r) => r.qty > 0);
   const total = list.reduce((a, r) => a + r.value, 0);
-  list.forEach((r) => (r.share = total ? r.value / total : 0));
+  all.forEach((r) => (r.share = total ? r.value / total : 0));
   list.sort((a, b) => b.value - a.value);
-  return { list, total, cost: list.reduce((a, r) => a + r.cost, 0) };
+  const closed = all.filter((r) => r.qty === 0);
+  return {
+    list, closed, total,
+    cost: list.reduce((a, r) => a + r.cost, 0),
+    realized: all.reduce((a, r) => a + r.realized, 0),
+  };
 }
 const stale = (iso) => !iso || Date.now() - new Date(iso).getTime() > 3 * 864e5;
 const yearNow = () => String(new Date().getFullYear());
@@ -109,13 +144,28 @@ const yearNow = () => String(new Date().getFullYear());
 /* ---------- portfell ---------- */
 function render() { renderPortfolio(); renderPlan(); renderCalc(); renderTx(); }
 
+function holdingItem(r, onclick) {
+  const sub = r.type === "Hoius"
+    ? [r.rate ? `${pct(r.rate, 2)} intress` : "Hoius", r.maturity ? "kuni " + new Date(r.maturity).toLocaleDateString("et-EE") : ""].filter(Boolean).join(" · ")
+    : r.qty ? `${qtyFmt(r.qty)} tk · ${r.pi.source === "ostuhind" ? "hind puudub" : eur(r.price)}${r.pi.source === "käsitsi" ? " (käsitsi)" : ""}` : "müüdud";
+  const plPct = r.cost ? (r.pl / r.cost) * 100 : 0;
+  return el("li", {}, el("button", { class: "item", type: "button", onclick },
+    el("span", { class: "av", style: `background:${TYPE_COLOR[r.type] || "#888"}`, text: r.ticker.slice(0, 4) }),
+    el("span", { class: "it-main" }, el("div", { class: "it-title", text: r.name || r.ticker }), el("div", { class: "it-sub", text: sub })),
+    el("span", { class: "it-r" },
+      r.qty ? el("div", { class: "it-val", text: eur0(r.value) }) : el("div", { class: "it-val " + (r.realized >= 0 ? "gain" : "loss"), text: sign(r.realized) + eur0(Math.abs(r.realized)) }),
+      r.type === "Hoius" ? el("div", { class: "it-pl muted", text: pct(r.share * 100, 0) })
+        : r.qty ? el("div", { class: "it-pl " + (r.pl >= 0 ? "gain" : "loss"), text: `${sign(r.pl)}${eur0(Math.abs(r.pl))} · ${sign(plPct)}${pct(Math.abs(plPct))}` })
+        : el("div", { class: "it-pl muted", text: "realiseeritud" }))));
+}
+
 function renderPortfolio() {
-  const { list, total, cost } = rows();
+  const { list, closed, total, cost, realized } = rows();
   $("k-value").textContent = eur0(total);
   const pl = total - cost, kp = $("k-pl");
-  kp.textContent = list.length ? `${sign(pl)}${eur0(Math.abs(pl))} (${sign(pl)}${pct(cost ? Math.abs(pl / cost) * 100 : 0)}) kogu aja jooksul` : "Lisa oma esimene investeering";
+  kp.textContent = list.length ? `${sign(pl)}${eur0(Math.abs(pl))} (${sign(pl)}${pct(cost ? Math.abs(pl / cost) * 100 : 0)}) ${pl >= 0 ? "kasumis" : "kahjumis"}` : "Lisa oma esimene investeering";
   kp.className = "hero-pl " + (!list.length ? "" : pl >= 0 ? "up" : "down");
-  $("k-cost").textContent = list.length ? `Sisse pandud ${eur0(cost)}` : "";
+  $("k-cost").textContent = list.length ? `Investeeritud ${eur0(cost)}` + (Math.abs(realized) > 0.004 ? ` · müükidelt ${sign(realized)}${eur0(Math.abs(realized))}` : "") : "";
   const dates = list.filter((r) => r.pi.source !== "ostuhind" && r.pi.at).map((r) => r.pi.at).sort();
   $("freshness").textContent = dates.length ? "Hinnad " + new Date(dates[0]).toLocaleString("et-EE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 
@@ -125,20 +175,9 @@ function renderPortfolio() {
   $("alloc").hidden = !list.length;
   $("legend").textContent = types.map(([t, v]) => `${t} ${pct(total ? (v / total) * 100 : 0, 0)}`).join(" · ");
 
-  const ul = $("h-list"); ul.replaceChildren();
-  $("h-empty").hidden = list.length > 0;
-  list.forEach((r) => {
-    const sub = r.type === "Hoius"
-      ? [r.rate ? `${pct(r.rate, 2)} intress` : "Hoius", r.maturity ? "kuni " + new Date(r.maturity).toLocaleDateString("et-EE") : ""].filter(Boolean).join(" · ")
-      : `${fmt(r.qty, r.qty % 1 ? 3 : 0)} tk · ${r.pi.source === "ostuhind" ? "hind puudub" : eur(r.price)}${r.pi.source === "käsitsi" ? " (käsitsi)" : ""}${r.buyCurrency === "USD" && r.buyPrice ? ` · ost ${fmt(r.buyPrice, 2)} $` : ""}`;
-    const plPct = r.cost ? (r.pl / r.cost) * 100 : 0;
-    ul.append(el("li", {}, el("button", { class: "item", type: "button", onclick: () => openHolding(r) },
-      el("span", { class: "av", style: `background:${TYPE_COLOR[r.type] || "#888"}`, text: r.ticker.slice(0, 4) }),
-      el("span", { class: "it-main" }, el("div", { class: "it-title", text: r.name || r.ticker }), el("div", { class: "it-sub", text: sub })),
-      el("span", { class: "it-r" }, el("div", { class: "it-val", text: eur0(r.value) }),
-        r.type === "Hoius" ? el("div", { class: "it-pl muted", text: pct(r.share * 100, 0) })
-          : el("div", { class: "it-pl " + (r.pl >= 0 ? "gain" : "loss"), text: `${sign(plPct)}${pct(Math.abs(plPct))}` })))));
-  });
+  $("h-empty").hidden = list.length + closed.length > 0;
+  $("h-list").replaceChildren(...list.map((r) => holdingItem(r, () => openDetail(r.id))),
+    ...closed.map((r) => holdingItem(r, () => openDetail(r.id))));
   renderAlerts(list);
   renderTips(list);
 }
@@ -154,7 +193,7 @@ function renderAlerts(list) {
   list.filter((r) => SAFE.includes(r.type) && r.maturity && new Date(r.maturity).getTime() < soon)
     .forEach((r) => items.push(["info", `${r.name || r.ticker} lõpeb ${new Date(r.maturity).toLocaleDateString("et-EE")}. Mõtle, kuhu see raha edasi läheb.`]));
   const st = list.filter((r) => r.type !== "Hoius" && (r.pi.source === "ostuhind" || stale(r.pi.at)));
-  if (st.length) items.push(["info", `${st.map((r) => r.ticker).join(", ")}: hind puudub või on vana. Vajuta üleval ↻ või ava investeering ja sisesta hind.`]);
+  if (st.length) items.push(["info", `${st.map((r) => r.ticker).join(", ")}: hind puudub või on vana. Vajuta üleval ↻ või ava investeering → Muuda andmeid.`]);
   items.slice(0, 3).forEach(([c, t]) => box.append(el("div", { class: "alert " + c, text: t })));
 }
 
@@ -162,11 +201,11 @@ function renderTips(list) {
   const total = list.reduce((a, r) => a + r.value, 0);
   const hasDiverse = list.some((r) => DIVERSE.includes(r.type));
   const hasTargets = list.some((r) => r.target > 0);
-  const dep = S.txns.filter((t) => t.kind === "deposit").length;
+  const buys = S.trades.filter((t) => t.side === "buy").length;
   const tips = [
     { hot: list.length > 0 && !hasDiverse, t: "Hajuta riski", d: "Üks laia maailma indeksfond (ETF) sisaldab tuhandeid ettevõtteid. Siis ei sõltu sa ühe firma käekäigust." },
     { hot: list.length > 0 && !hasTargets, t: "Pane paika oma jaotus", d: "Otsusta ette, mitu protsenti on aktsiaid, fonde ja võlakirju. Kuuplaan ütleb siis igal kuul, mida osta." },
-    { hot: total > 0 && dep < 2, t: "Investeeri regulaarselt", d: "Sama summa iga kuu on lihtsam ja rahulikum kui õige hetke ootamine. Keegi ei tea, kuhu turg homme liigub." },
+    { hot: total > 0 && buys < 3, t: "Investeeri regulaarselt", d: "Sama summa iga kuu on lihtsam ja rahulikum kui õige hetke ootamine. Keegi ei tea, kuhu turg homme liigub." },
     { hot: false, t: "Enne investeerimist hädaabiraha", d: "Hoia 3–6 kuu kulud kergesti kättesaadavana, et ei peaks halval hetkel investeeringuid müüma." },
     { hot: false, t: "Raha, mida vajad 5 aasta jooksul, ära pane aktsiatesse", d: "Lühemaks ajaks sobivad paremini hoius või võlakirjad, sest aktsiad võivad vahepeal palju langeda." },
     { hot: false, t: "Jälgi tasusid", d: "1 % aastatasu võtab 30 aastaga umbes neljandiku lõppsummast. Laia indeksfondi tasu on tavaliselt alla 0,3 %." },
@@ -184,8 +223,6 @@ function renderPlan() {
   const m = Math.max(0, +$("p-monthly").value || 0);
   const tsum = list.reduce((a, r) => a + (+r.target || 0), 0);
   const ts = $("t-sum"); ts.textContent = `Kokku ${fmt(tsum, 0)} %`; ts.className = "pill" + (Math.abs(tsum - 100) > 0.01 ? " off" : "");
-
-  // sihtjaotuse read (ära joonista üle, kui kasutaja just trükib)
   const tl = $("p-targets");
   if (!tl.contains(document.activeElement)) {
     tl.replaceChildren(...list.map((r) => {
@@ -195,24 +232,22 @@ function renderPlan() {
         el("div", { class: "it-sub", text: `Praegu ${pct(r.share * 100, 0)}` })), el("label", { class: "money", style: "gap:4px" }, inp, el("span", { style: "font-size:16px", text: "%" })));
     }));
   }
-
   const after = total + m;
   const def = list.map((r) => Math.max(0, ((+r.target || 0) / (tsum || 1)) * after - r.value));
   const dsum = def.reduce((a, b) => a + b, 0);
   const buys = list.map((r, i) => ({ r, buy: dsum ? (def[i] / dsum) * m : 0 })).filter((x) => x.buy >= 0.5);
-  const bl = $("p-buys"); bl.replaceChildren();
   let foot = "";
   if (!list.length) foot = "Lisa kõigepealt investeeringud Portfelli vaates.";
   else if (!tsum) foot = "Pane allpool igale investeeringule soovitud osakaal, siis näed, mida osta.";
   else if (!m) foot = "Sisesta kuusumma.";
-  buys.forEach(({ r, buy }) => {
+  $("p-buys").replaceChildren(...buys.map(({ r, buy }) => {
     const units = r.type !== "Hoius" && r.price ? buy / r.price : null;
-    bl.append(el("li", {}, el("div", { class: "item", style: "cursor:default" },
+    return el("li", {}, el("div", { class: "item", style: "cursor:default" },
       el("span", { class: "av", style: `background:${TYPE_COLOR[r.type] || "#888"}`, text: r.ticker.slice(0, 4) }),
       el("span", { class: "it-main" }, el("div", { class: "it-title", text: r.name || r.ticker }),
         el("div", { class: "it-sub", text: units == null ? "lisa hoiusele" : units < 1 ? `≈ ${fmt(units, 2)} tk (murdosa)` : `≈ ${fmt(Math.floor(units), 0)} tk` })),
-      el("span", { class: "it-r" }, el("div", { class: "it-val gain", text: eur(buy, 0) })))));
-  });
+      el("span", { class: "it-r" }, el("div", { class: "it-val gain", text: eur(buy, 0) }))));
+  }));
   if (!foot && buys.length) foot = "Ostud viivad portfelli soovitud jaotusele lähemale ilma midagi müümata.";
   $("p-foot").textContent = foot;
 }
@@ -293,17 +328,19 @@ function renderTx() {
   const { cost } = rows();
   const now = new Date(), yearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()).toISOString().slice(0, 10);
   const d12 = S.txns.filter((t) => t.kind === "dividend" && t.date >= yearAgo).reduce((a, t) => a + t.amount, 0);
-  $("y-yield").textContent = cost && d12 ? `Viimase 12 kuuga said dividende ${eur(d12)}, see on ${pct((d12 / cost) * 100, 2)} sisse pandud rahast.` : "";
+  $("y-yield").textContent = cost && d12 ? `Viimase 12 kuuga said dividende ${eur(d12)}, see on ${pct((d12 / cost) * 100, 2)} investeeritud rahast.` : "";
 }
 
 /* ---------- alumine leht ---------- */
-function openSheet(title, formId) {
+const PANES = ["h-form", "t-form", "d-view", "r-form"];
+function openSheet(title, paneId) {
   $("sheet-title").textContent = title;
-  ["h-form", "t-form"].forEach((id) => ($(id).hidden = id !== formId));
+  PANES.forEach((id) => ($(id).hidden = id !== paneId));
   $("sheet").hidden = false;
   document.body.style.overflow = "hidden";
+  $("sheet").querySelector(".sheet").scrollTop = 0;
 }
-function closeSheet() { $("sheet").hidden = true; document.body.style.overflow = ""; }
+function closeSheet() { $("sheet").hidden = true; document.body.style.overflow = ""; openDetailId = null; }
 document.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", closeSheet));
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("sheet").hidden) closeSheet(); });
 
@@ -315,7 +352,70 @@ function chipGroup(boxId, options, onPick) {
   return { get: () => value, set };
 }
 
-/* investeering */
+/* ----- tehingu väljad (jagatud uue investeeringu ja tehingu vormi vahel) ----- */
+let trType = "ETF", fxManual = false;
+const curPick = chipGroup("tr-cur", [["EUR", "€ EUR"], ["USD", "$ USD"]], () => { syncTrade(); if (curPick.get() === "USD" && !fxManual) loadFx(); });
+function mountTradeFields(slotId, type) {
+  $(slotId).append($("tr-fields"));
+  trType = type;
+  syncTrade();
+}
+function syncTrade() {
+  const dep = trType === "Hoius", usd = curPick.get() === "USD";
+  $("tr-qty-lbl").textContent = dep ? "Summa €" : "Kogus (tk)";
+  $("tr-price-row").hidden = dep; $("tr-price").required = !dep;
+  $("tr-cur-row").hidden = dep;
+  $("tr-usd").hidden = dep || !usd;
+  $("tr-price-lbl").textContent = usd ? "Hind 1 tk $" : "Hind 1 tk €";
+  tradeTotal();
+}
+async function loadFx() {
+  const date = $("tr-date").value;
+  $("tr-fx").placeholder = "laen…";
+  const v = await usdToEur(date);
+  if (fxManual || curPick.get() !== "USD" || $("tr-date").value !== date) return;
+  if (v) $("tr-fx").value = v.toFixed(4); else $("tr-fx").placeholder = "sisesta ise";
+  tradeTotal();
+}
+function tradeValues() {
+  const dep = trType === "Hoius", usd = !dep && curPick.get() === "USD";
+  const qty = +$("tr-qty").value || 0;
+  return {
+    date: $("tr-date").value || today(), qty,
+    price: dep ? 1 : +$("tr-price").value || 0,
+    currency: usd ? "USD" : "EUR", fx: usd ? +$("tr-fx").value || 0 : 1,
+    fee: dep ? 0 : +$("tr-fee").value || 0,
+  };
+}
+function tradeTotal() {
+  const v = tradeValues(), sell = !$("r-form").hidden && sidePick.get() === "sell";
+  const gross = v.qty * v.price * (v.fx || 0);
+  $("tr-fx-out").textContent = v.currency === "USD" && v.price && v.fx ? `${fmt(v.price, 2)} $ × ${fmt(v.fx, 4)} = ${eur(v.price * v.fx)} tükk` : "Kurss võetakse Euroopa Keskpangast sinu valitud päeva järgi.";
+  $("tr-total").textContent = trType === "Hoius" || !v.qty || !v.price ? "" :
+    sell ? `Saad kätte ${eur(gross - v.fee)}${v.fee ? ` (tasu ${eur(v.fee)} maha arvatud)` : ""}` : `Kokku ${eur(gross + v.fee)}${v.fee ? ` (sh tasu ${eur(v.fee)})` : ""}`;
+}
+$("tr-date").addEventListener("change", () => { fxManual = false; if (curPick.get() === "USD") loadFx(); });
+$("tr-fx").addEventListener("input", () => { fxManual = true; tradeTotal(); });
+["tr-qty", "tr-price", "tr-fee"].forEach((id) => $(id).addEventListener("input", tradeTotal));
+function resetTradeFields(t) {
+  $("tr-date").value = t ? t.date : today();
+  $("tr-qty").value = t ? t.qty : ""; $("tr-price").value = t ? t.price : ""; $("tr-fee").value = t && t.fee ? t.fee : "";
+  $("tr-fx").value = t && t.currency === "USD" ? t.fx : "";
+  fxManual = !!(t && t.currency === "USD");
+  curPick.set(t ? t.currency : "EUR");
+}
+async function validTrade() {
+  const v = tradeValues();
+  if (!(v.qty > 0)) { toast("Sisesta kogus."); return null; }
+  if (trType !== "Hoius" && !(v.price > 0)) { toast("Sisesta hind."); return null; }
+  if (v.currency === "USD" && !(v.fx > 0)) {
+    v.fx = await usdToEur(v.date);
+    if (!(v.fx > 0)) { toast("Dollari kurssi ei õnnestunud laadida. Sisesta kurss käsitsi."); return null; }
+  }
+  return v;
+}
+
+/* ----- investeeringu vorm (uus / muuda andmeid) ----- */
 let editing = null, delArm = false;
 const typePick = chipGroup("h-types", TYPES.map((t) => [t, t]), syncType);
 function syncType(t) {
@@ -323,54 +423,19 @@ function syncType(t) {
   $("h-extra").hidden = !(bond || dep);
   $("h-rate-lbl").textContent = dep ? "Intress % aastas" : "Kupong % aastas";
   $("h-mat-lbl").textContent = dep ? "Tähtaeg" : "Lunastus";
-  $("h-qty-lbl").textContent = dep ? "Summa €" : "Kogus (tk)";
   $("h-ticker-lbl").textContent = dep ? "Lühinimi" : bond ? "Võlakirja sümbol või nimi" : "Otsi nime või sümboli järgi";
   $("h-ticker").placeholder = dep ? "HOIUS" : bond ? "nt LHVB070033A" : { ETF: "nt Vanguard, VWCE", Aktsia: "nt LHV, Apple, Tesla", Fond: "nt iShares", Krüpto: "nt Bitcoin" }[t] || "nt Vanguard, LHV, Apple";
-  $("h-avg-wrap").hidden = dep; $("h-avg").required = !dep;
-  $("h-cur-row").hidden = dep; if (dep) curPick.set("EUR");
   $("h-nom-wrap").hidden = !bond; $("h-sym-wrap").hidden = dep; $("h-manual-wrap").hidden = dep;
   $("h-more").hidden = dep;
+  $("h-buy-lbl").textContent = dep ? "Sissemakse hoiusele" : "Esimene ost";
   $("h-symbol").placeholder = guessSymbol($("h-ticker").value, t) || "arvatakse ise";
+  if (!$("h-buy").hidden) { trType = t; syncTrade(); }
 }
-const curPick = chipGroup("h-cur", [["EUR", "€ eurodes"], ["USD", "$ dollarites"]], syncCur);
-let fxManual = false;
-function syncCur(c) {
-  const usd = c === "USD";
-  $("h-usd").hidden = !usd;
-  $("h-avg-lbl").textContent = usd ? "Ostuhind $" : "Ostuhind €";
-  if (usd && !fxManual) loadFx();
-  fxHint();
-}
-async function loadFx() {
-  const date = $("h-date").value;
-  $("h-fx").placeholder = "laen…";
-  const v = await usdToEur(date);
-  if (fxManual || curPick.get() !== "USD" || $("h-date").value !== date) return;
-  if (v) $("h-fx").value = v.toFixed(4);
-  else $("h-fx").placeholder = "sisesta ise";
-  fxHint();
-}
-function fxHint() {
-  const p = +$("h-avg").value, fx = +$("h-fx").value;
-  $("h-fx-out").textContent = curPick.get() !== "USD" ? "" : p && fx ? `${fmt(p, 2)} $ × ${fmt(fx, 4)} = ${eur(p * fx)} tüki kohta` : "Kursi järgi arvutame ostuhinna eurodesse, et kasum oleks õige.";
-}
-$("h-date").addEventListener("change", () => { fxManual = false; loadFx(); });
-$("h-fx").addEventListener("input", () => { fxManual = true; fxHint(); });
-$("h-avg").addEventListener("input", fxHint);
-$("h-ticker").addEventListener("input", () => {
-  $("h-symbol").placeholder = guessSymbol($("h-ticker").value, typePick.get()) || "arvatakse ise";
-  searchInstruments();
-});
-
-/* Väärtpaberite otsing (Yahoo Finance serveri funktsiooni kaudu) */
 let searchT, searchSeq = 0, picked = null;
 function hideResults() { $("h-results").hidden = true; $("h-results").replaceChildren(); }
-function showPicked(sym, exch) {
-  const p = $("h-picked");
-  p.textContent = `✓ ${sym}${exch ? " · " + exch : ""} · hind tuleb automaatselt`;
-  p.hidden = false;
-}
-function searchInstruments() {
+function showPicked(sym, exch) { const p = $("h-picked"); p.textContent = `✓ ${sym}${exch ? " · " + exch : ""} · hind tuleb automaatselt`; p.hidden = false; }
+$("h-ticker").addEventListener("input", () => {
+  $("h-symbol").placeholder = guessSymbol($("h-ticker").value, typePick.get()) || "arvatakse ise";
   const q = $("h-ticker").value.trim(), t = typePick.get();
   if (picked && q !== picked.short) { picked = null; $("h-picked").hidden = true; $("h-symbol").value = ""; }
   clearTimeout(searchT);
@@ -380,75 +445,75 @@ function searchInstruments() {
     const { data, error } = await sb.functions.invoke("search", { body: { q } });
     if (seq !== searchSeq || picked) return;
     const res = error ? [] : (data?.results || []).slice(0, 8);
-    const ul = $("h-results");
     if (!res.length) { hideResults(); return; }
-    ul.replaceChildren(...res.map((x) => el("li", {}, el("button", { class: "res", type: "button", onclick: () => pickInstrument(x) },
+    $("h-results").replaceChildren(...res.map((x) => el("li", {}, el("button", { class: "res", type: "button", onclick: () => pickInstrument(x) },
       el("span", { class: "av sm", style: `background:${TYPE_COLOR[x.type] || "#888"}`, text: x.symbol.split(/[.\-]/)[0].slice(0, 4) }),
       el("span", { class: "it-main" }, el("div", { class: "it-title", text: x.name }), el("div", { class: "it-sub", text: `${x.symbol} · ${x.exchange} · ${x.type}` }))))));
-    ul.hidden = false;
+    $("h-results").hidden = false;
   }, 300);
-}
+});
 function pickInstrument(x) {
   const short = x.symbol.split(/[.\-]/)[0];
   picked = { ...x, short };
   if (TYPES.includes(x.type)) typePick.set(x.type);
-  $("h-ticker").value = short;
-  $("h-name").value = x.name;
-  $("h-symbol").value = x.symbol;
+  $("h-ticker").value = short; $("h-name").value = x.name; $("h-symbol").value = x.symbol;
+  if (/\.(DE|F|AS|PA|MI|TL|RG|VS|HE|BR|MC|VI|LS|IR)$/.test(x.symbol)) curPick.set("EUR");
+  else if (!x.symbol.includes(".") && x.type !== "Krüpto") { curPick.set("USD"); }
   hideResults(); showPicked(x.symbol, x.exchange);
-  $("h-qty").focus();
+  $("tr-qty").focus();
 }
 function openHolding(r) {
   editing = r || null; delArm = false;
   $("h-form").reset();
   picked = null; hideResults(); $("h-picked").hidden = true;
   if (r && r.symbol && r.type !== "Hoius") { picked = { short: r.ticker, symbol: r.symbol }; showPicked(r.symbol, ""); }
+  $("h-buy").hidden = !!r;
+  if (!r) { resetTradeFields(null); mountTradeFields("h-buy-slot", "ETF"); }
+  else $("r-slot").append($("tr-fields")); // peidetud kohustuslikud väljad ei tohi vormi blokeerida
   typePick.set(r ? r.type : "ETF");
   if (r) {
-    $("h-ticker").value = r.ticker; $("h-name").value = r.name || ""; $("h-qty").value = r.qty; $("h-avg").value = r.avgPrice;
+    $("h-ticker").value = r.ticker; $("h-name").value = r.name || "";
     $("h-rate").value = r.rate ?? ""; $("h-mat").value = r.maturity || ""; $("h-nom").value = r.nominal ?? "";
     $("h-symbol").value = r.symbol || ""; $("h-manual").value = r.manualPrice ?? "";
   }
-  fxManual = !!(r && r.buyCurrency === "USD" && r.buyFx);
-  if (r && r.buyCurrency === "USD") {
-    $("h-avg").value = r.buyPrice ?? r.avgPrice; $("h-date").value = r.buyDate || ""; $("h-fx").value = r.buyFx ?? "";
-  }
-  curPick.set(r ? r.buyCurrency : "EUR");
   syncType(typePick.get());
-  $("h-delete").hidden = !r; $("h-delete").textContent = "Kustuta investeering";
-  openSheet(r ? (r.name || r.ticker) : "Lisa investeering", "h-form");
+  $("h-ticker").required = true;
+  $("h-delete").hidden = !r; $("h-delete").textContent = "Kustuta investeering koos tehingutega";
+  $("h-submit").textContent = r ? "Salvesta" : "Lisa investeering";
+  openSheet(r ? "Muuda: " + (r.name || r.ticker) : "Lisa investeering", "h-form");
   if (!r) setTimeout(() => $("h-ticker").focus(), 50);
 }
 $("add-holding").addEventListener("click", () => openHolding(null));
 $("h-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (!S.hasTrades) return toast("Andmebaas vajab uuendust: käivita Supabase'is fail 002_trades.sql.");
   const type = typePick.get(), ticker = up($("h-ticker").value);
   if (!ticker) return;
   const body = {
     ticker, type, name: $("h-name").value.trim() || null,
     symbol: type === "Hoius" ? null : up($("h-symbol").value) || guessSymbol(ticker, type),
-    qty: +$("h-qty").value, avg_price: type === "Hoius" ? 1 : +$("h-avg").value,
     rate: SAFE.includes(type) && $("h-rate").value !== "" ? +$("h-rate").value : null,
     maturity: SAFE.includes(type) && $("h-mat").value ? $("h-mat").value : null,
     nominal: type === "Võlakiri" && $("h-nom").value !== "" ? +$("h-nom").value : null,
   };
-  if (type !== "Hoius" && curPick.get() === "USD") {
-    let fx = +$("h-fx").value;
-    if (!(fx > 0)) fx = await usdToEur($("h-date").value);
-    if (!(fx > 0)) return toast("Dollari kurssi ei õnnestunud laadida. Sisesta kurss käsitsi (1 $ = ? €).");
-    const native = +$("h-avg").value;
-    Object.assign(body, { avg_price: native * fx, buy_currency: "USD", buy_price: native, buy_fx: fx, buy_date: $("h-date").value || null });
-  } else {
-    Object.assign(body, { buy_currency: "EUR", buy_price: null, buy_fx: null, buy_date: null });
-  }
   const manual = $("h-manual").value;
   if (type !== "Hoius" && manual !== "" && (!editing || +manual !== editing.manualPrice)) { body.manual_price = +manual; body.manual_price_at = new Date().toISOString(); }
   if (type !== "Hoius" && manual === "" && editing && editing.manualPrice != null) { body.manual_price = null; body.manual_price_at = null; }
-  const { error } = editing ? await sb.from("holdings").update(body).eq("id", editing.id) : await sb.from("holdings").insert(body);
+
+  if (editing) {
+    const { error } = await sb.from("holdings").update(body).eq("id", editing.id);
+    if (error) return toast("Salvestamine ebaõnnestus: " + error.message);
+    const id = editing.id; await loadAll(); openDetail(id); return;
+  }
+  trType = type;
+  const tv = await validTrade(); if (!tv) return;
+  body.qty = 0; body.avg_price = 0;
+  const { data, error } = await sb.from("holdings").insert(body).select().single();
   if (error) return toast("Salvestamine ebaõnnestus: " + error.message);
-  const isNew = !editing;
+  const r2 = await sb.from("trades").insert({ holding_id: data.id, side: "buy", ...tv });
+  if (r2.error) { await sb.from("holdings").delete().eq("id", data.id); return toast("Ostu salvestamine ebaõnnestus: " + r2.error.message); }
   closeSheet(); await loadAll();
-  if (isNew && type !== "Hoius") updatePrices(true);
+  if (type !== "Hoius") updatePrices(true);
 });
 $("h-delete").addEventListener("click", async () => {
   if (!delArm) { delArm = true; $("h-delete").textContent = "Vajuta uuesti, et kustutada"; return; }
@@ -457,14 +522,105 @@ $("h-delete").addEventListener("click", async () => {
   closeSheet(); loadAll();
 });
 
-/* kanne */
+/* ----- investeeringu detailvaade ----- */
+let openDetailId = null;
+function openDetail(id) {
+  const r = rows().list.concat(rows().closed).find((x) => x.id === id);
+  if (!r) return;
+  openDetailId = id;
+  fillDetail(r);
+  openSheet(r.name || r.ticker, "d-view");
+}
+function fillDetail(r) {
+  const dep = r.type === "Hoius";
+  $("d-value").textContent = eur(r.value);
+  const plPct = r.cost ? (r.pl / r.cost) * 100 : 0;
+  $("d-pl").textContent = dep ? (r.rate ? `${pct(r.rate, 2)} intress aastas` : "") : r.qty ? `${sign(r.pl)}${eur(Math.abs(r.pl))} (${sign(plPct)}${pct(Math.abs(plPct), 2)})` : "Positsioon on müüdud";
+  $("d-pl").className = "d-pl " + (dep ? "muted" : r.pl >= 0 ? "gain" : "loss");
+  const divs = divsFor(r);
+  const st = dep ? [
+    ["Summa", eur(r.qty)], ["Tähtaeg", r.maturity ? new Date(r.maturity).toLocaleDateString("et-EE") : "–"],
+    ["Intress aastas", r.rate ? eur((r.qty * r.rate) / 100) : "–"], ["Osakaal", pct(r.share * 100)],
+  ] : [
+    ["Kogus", qtyFmt(r.qty) + " tk"], ["Keskmine ostuhind", eur(r.avgPrice)],
+    ["Investeeritud", eur(r.cost)], ["Praegune hind", r.pi.source === "ostuhind" ? "puudub" : eur(r.price)],
+    ["Kasum (avatud)", `${sign(r.pl)}${eur(Math.abs(r.pl))}`], ["Müükidelt", `${sign(r.realized)}${eur(Math.abs(r.realized))}`],
+    ["Dividendid", eur(divs)], ["Tasud kokku", eur(r.fees)],
+  ];
+  $("d-stats").replaceChildren(...st.map(([k, v]) => el("div", {}, el("dt", { text: k }), el("dd", { class: "num", text: v }))));
+  let src = "";
+  if (!dep) {
+    if (r.pi.source === "ostuhind") src = "Turuhinda veel pole. Vajuta üleval ↻ või sisesta hind: Muuda andmeid → Täpsemalt.";
+    else if (r.pi.source === "käsitsi") src = `Hind sisestatud käsitsi ${new Date(r.pi.at).toLocaleString("et-EE")}.`;
+    else {
+      const native = r.pi.native && r.pi.cur && r.pi.cur !== "EUR" ? ` (${fmt(r.pi.native, 2)} ${r.pi.cur}, eurodesse teisendatud)` : "";
+      src = `Hind ${eur(r.price)}${native} · ${r.symbol} · ${r.pi.source || "Yahoo"} ${new Date(r.pi.at).toLocaleString("et-EE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}. Börsihind võib olla kuni 20 min viivitusega.`;
+    }
+    const total = r.pl + r.realized + divs;
+    if (r.trades.length) src += ` Kogukasum koos müükide ja dividendidega: ${sign(total)}${eur(Math.abs(total))}.`;
+  }
+  $("d-price").textContent = src;
+  $("d-sell").hidden = dep || !r.qty;
+  $("d-buy").textContent = dep ? "+ Lisa summat" : "+ Ost";
+  $("d-trades-empty").hidden = r.trades.length > 0;
+  $("d-trades").replaceChildren(...[...r.trades].reverse().map((t) => el("li", {}, el("button", { class: "item tr", type: "button", onclick: () => openTrade(r, t) },
+    el("span", { class: "side " + t.side, text: t.side === "buy" ? (dep ? "+" : "OST") : "MÜÜK" }),
+    el("span", { class: "it-main" },
+      el("div", { class: "it-title", text: dep ? eur(t.qty) : `${qtyFmt(t.qty)} tk × ${fmt(t.price, 2)} ${t.currency === "USD" ? "$" : "€"}` }),
+      el("div", { class: "it-sub", text: [dateEt(t.date), t.currency === "USD" ? `kurss ${fmt(t.fx, 4)}` : "", t.fee ? `tasu ${eur(t.fee)}` : ""].filter(Boolean).join(" · ") })),
+    el("span", { class: "it-r" }, el("div", { class: "it-val", text: eur(t.qty * t.price * t.fx + (t.side === "buy" ? t.fee : -t.fee)) }))))));
+}
+$("d-buy").addEventListener("click", () => { const r = rows().list.concat(rows().closed).find((x) => x.id === openDetailId); if (r) openTrade(r, null, "buy"); });
+$("d-sell").addEventListener("click", () => { const r = rows().list.find((x) => x.id === openDetailId); if (r) openTrade(r, null, "sell"); });
+$("d-edit").addEventListener("click", () => { const r = rows().list.concat(rows().closed).find((x) => x.id === openDetailId); if (r) openHolding(r); });
+
+/* ----- tehingu vorm ----- */
+let tradeCtx = null, trDelArm = false;
+const sidePick = chipGroup("r-side", [["buy", "Ost"], ["sell", "Müük"]], () => tradeTotal());
+function openTrade(r, t, side) {
+  tradeCtx = { r, t }; trDelArm = false;
+  resetTradeFields(t);
+  if (!t && r.trades.length) { const last = r.trades[r.trades.length - 1]; curPick.set(last.currency); }
+  sidePick.set(t ? t.side : side || "buy");
+  $("r-side").hidden = r.type === "Hoius";
+  mountTradeFields("r-slot", r.type);
+  $("r-delete").hidden = !t; $("r-delete").textContent = "Kustuta tehing";
+  openSheet(`${t ? "Muuda tehingut" : sidePick.get() === "sell" ? "Müük" : r.type === "Hoius" ? "Lisa summat" : "Ost"} · ${r.ticker}`, "r-form");
+  openDetailId = r.id;
+  if (!t) setTimeout(() => $("tr-qty").focus(), 50);
+}
+$("r-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const { r, t } = tradeCtx;
+  trType = r.type;
+  const v = await validTrade(); if (!v) return;
+  const side = r.type === "Hoius" ? "buy" : sidePick.get();
+  if (side === "sell") {
+    const others = r.trades.filter((x) => !t || x.id !== t.id);
+    const have = others.reduce((a, x) => a + (x.side === "buy" ? x.qty : -x.qty), 0);
+    if (v.qty > have + 1e-9) return toast(`Sul on ainult ${qtyFmt(have)} tk, rohkem müüa ei saa.`);
+  }
+  const body = { holding_id: r.id, side, ...v };
+  const { error } = t ? await sb.from("trades").update(body).eq("id", t.id) : await sb.from("trades").insert(body);
+  if (error) return toast("Salvestamine ebaõnnestus: " + error.message);
+  await loadAll(); openDetail(r.id);
+});
+$("r-delete").addEventListener("click", async () => {
+  if (!trDelArm) { trDelArm = true; $("r-delete").textContent = "Vajuta uuesti, et kustutada"; return; }
+  const { r, t } = tradeCtx;
+  const { error } = await sb.from("trades").delete().eq("id", t.id);
+  if (error) return toast("Kustutamine ebaõnnestus: " + error.message);
+  await loadAll(); openDetail(r.id);
+});
+
+/* ----- dividend / sissemakse ----- */
 let editingTx = null, txDelArm = false;
 const kindPick = chipGroup("t-kinds", [["dividend", "Dividend"], ["deposit", "Sissemakse"], ["withdraw", "Väljamakse"]]);
 function openTx(t) {
   editingTx = t || null; txDelArm = false;
   $("t-form").reset();
   kindPick.set(t ? t.kind : "dividend");
-  $("t-date").value = t ? t.date : new Date().toISOString().slice(0, 10);
+  $("t-date").value = t ? t.date : today();
   if (t) { $("t-amount").value = t.amount; $("t-ticker").value = t.ticker || ""; }
   $("t-delete").hidden = !t; $("t-delete").textContent = "Kustuta kanne";
   openSheet(t ? KIND[t.kind] : "Uus kanne", "t-form");
@@ -491,7 +647,7 @@ async function updatePrices(quiet) {
   const { data, error } = await sb.functions.invoke("update-prices");
   b.classList.remove("spin"); b.disabled = false;
   if (error) { if (!quiet) toast("Hindade uuendamine ebaõnnestus. Proovi hiljem uuesti."); return; }
-  if (data?.failed?.length && !quiet) toast(`Ei leidnud hinda: ${data.failed.join(", ")}. Ava investeering → Täpsemalt ja kontrolli hinnaallika sümbolit (nt VWCE.DE, LHV1T.TL, BTC-EUR).`);
+  if (data?.failed?.length && !quiet) toast(`Ei leidnud hinda: ${data.failed.join(", ")}. Ava investeering → Muuda andmeid → Täpsemalt ja kontrolli hinnaallika sümbolit.`);
   loadAll();
 }
 $("refresh").addEventListener("click", () => updatePrices(false));
@@ -524,4 +680,5 @@ function setUser(u) {
 }
 sb.auth.onAuthStateChange((_ev, session) => setUser(session?.user || null));
 sb.auth.getSession().then(({ data }) => setUser(data.session?.user || null));
+$("r-slot").append($("tr-fields"));
 render();
