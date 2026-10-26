@@ -38,10 +38,7 @@ button { font: inherit; color: inherit; }
 }
 .top { display: flex; align-items: center; justify-content: space-between; padding-block: 16px 12px; }
 .brand { font: 700 20px var(--f-display); letter-spacing: -.02em; display: flex; align-items: center; gap: 10px; }
-.mark { width: 22px; height: 22px; border-radius: 7px; background:
-  linear-gradient(to top, var(--accent) 0 40%, transparent 40%) 2px 0 / 5px 100% no-repeat,
-  linear-gradient(to top, var(--accent) 0 65%, transparent 65%) 8.5px 0 / 5px 100% no-repeat,
-  linear-gradient(to top, var(--accent) 0 95%, transparent 95%) 15px 0 / 5px 100% no-repeat; }
+.mark { width: 30px; height: 30px; border-radius: 9px; display: block; }
 .top-r { display: flex; gap: 4px; }
 .icon-btn { background: none; border: 0; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; cursor: pointer; color: var(--muted); }
 .icon-btn:hover { background: var(--soft); color: var(--fg); }
@@ -179,3 +176,4 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 
 .usd-box { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--bg); }
 .usd-box p { margin: 0; }
 .usd-box input { background: var(--card); }
+.auth-logo { width: 84px; height: 84px; border-radius: 22px; margin-bottom: 8px; box-shadow: 0 10px 30px rgba(18,58,44,.25); }
