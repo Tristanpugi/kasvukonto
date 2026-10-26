@@ -136,7 +136,18 @@
       <label class="field"><span>Nimi <i>(valikuline)</i></span><input id="h-name" placeholder="Vanguard FTSE All-World"></label>
       <div class="two">
         <label class="field"><span id="h-qty-lbl">Kogus</span><input id="h-qty" type="number" inputmode="decimal" step="any" min="0" required></label>
-        <label class="field" id="h-avg-wrap"><span>Ostuhind €</span><input id="h-avg" type="number" inputmode="decimal" step="any" min="0" required></label>
+        <label class="field" id="h-avg-wrap"><span id="h-avg-lbl">Ostuhind €</span><input id="h-avg" type="number" inputmode="decimal" step="any" min="0" required></label>
+      </div>
+      <div class="cur-row" id="h-cur-row">
+        <span class="muted small">Ostsin</span>
+        <div class="chips" id="h-cur" role="radiogroup" aria-label="Ostu valuuta"></div>
+      </div>
+      <div id="h-usd" class="usd-box" hidden>
+        <div class="two">
+          <label class="field"><span>Ostu kuupäev</span><input id="h-date" type="date"></label>
+          <label class="field"><span>Kurss: 1 $ = ? €</span><input id="h-fx" type="number" inputmode="decimal" step="any" min="0" placeholder="laen…"></label>
+        </div>
+        <p class="muted small" id="h-fx-out"></p>
       </div>
       <div class="two" id="h-extra" hidden>
         <label class="field"><span id="h-rate-lbl">Intress %</span><input id="h-rate" type="number" inputmode="decimal" step="any" min="0"></label>

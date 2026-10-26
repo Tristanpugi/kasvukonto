@@ -47,7 +47,25 @@ const fromRow = (r) => ({
   qty: +r.qty, avgPrice: +r.avg_price, target: +r.target || 0,
   nominal: r.nominal == null ? null : +r.nominal, rate: r.rate == null ? null : +r.rate, maturity: r.maturity || "",
   manualPrice: r.manual_price == null ? null : +r.manual_price, manualAt: r.manual_price_at,
+  buyCurrency: r.buy_currency || "EUR", buyPrice: r.buy_price == null ? null : +r.buy_price,
+  buyFx: r.buy_fx == null ? null : +r.buy_fx, buyDate: r.buy_date || "",
 });
+
+/* Valuutakurss: mitu eurot saab 1 dollari eest antud päeval (ECB andmed, Frankfurter). */
+const fxCache = {};
+async function usdToEur(date) {
+  const key = date || "latest";
+  if (fxCache[key]) return fxCache[key];
+  const tries = [
+    async () => (await (await fetch(`https://api.frankfurter.dev/v2/rate/usd/eur${date ? "?date=" + date : ""}`)).json()).rate,
+    async () => (await (await fetch(`https://api.frankfurter.dev/v1/${date || "latest"}?base=USD&symbols=EUR`)).json()).rates.EUR,
+    async () => (await (await fetch(`https://api.frankfurter.app/${date || "latest"}?from=USD&to=EUR`)).json()).rates.EUR,
+  ];
+  for (const t of tries) {
+    try { const v = +(await t()); if (v > 0) return (fxCache[key] = v); } catch (_e) { /* proovi järgmist */ }
+  }
+  return null;
+}
 async function loadAll() {
   const [h, t, s, p] = await Promise.all([
     sb.from("holdings").select("*"),
@@ -112,7 +130,7 @@ function renderPortfolio() {
   list.forEach((r) => {
     const sub = r.type === "Hoius"
       ? [r.rate ? `${pct(r.rate, 2)} intress` : "Hoius", r.maturity ? "kuni " + new Date(r.maturity).toLocaleDateString("et-EE") : ""].filter(Boolean).join(" · ")
-      : `${fmt(r.qty, r.qty % 1 ? 3 : 0)} tk · ${r.pi.source === "ostuhind" ? "hind puudub" : eur(r.price)}${r.pi.source === "käsitsi" ? " (käsitsi)" : ""}`;
+      : `${fmt(r.qty, r.qty % 1 ? 3 : 0)} tk · ${r.pi.source === "ostuhind" ? "hind puudub" : eur(r.price)}${r.pi.source === "käsitsi" ? " (käsitsi)" : ""}${r.buyCurrency === "USD" && r.buyPrice ? ` · ost ${fmt(r.buyPrice, 2)} $` : ""}`;
     const plPct = r.cost ? (r.pl / r.cost) * 100 : 0;
     ul.append(el("li", {}, el("button", { class: "item", type: "button", onclick: () => openHolding(r) },
       el("span", { class: "av", style: `background:${TYPE_COLOR[r.type] || "#888"}`, text: r.ticker.slice(0, 4) }),
@@ -309,10 +327,36 @@ function syncType(t) {
   $("h-ticker-lbl").textContent = dep ? "Lühinimi" : "Sümbol";
   $("h-ticker").placeholder = { ETF: "VWCE", Aktsia: "LHV1T", Fond: "EUNL", Võlakiri: "LHVB070033A", Hoius: "HOIUS", Krüpto: "BTC", Muu: "" }[t] || "";
   $("h-avg-wrap").hidden = dep; $("h-avg").required = !dep;
+  $("h-cur-row").hidden = dep; if (dep) curPick.set("EUR");
   $("h-nom-wrap").hidden = !bond; $("h-sym-wrap").hidden = dep; $("h-manual-wrap").hidden = dep;
   $("h-more").hidden = dep;
   $("h-symbol").placeholder = guessSymbol($("h-ticker").value, t) || "arvatakse ise";
 }
+const curPick = chipGroup("h-cur", [["EUR", "€ eurodes"], ["USD", "$ dollarites"]], syncCur);
+let fxManual = false;
+function syncCur(c) {
+  const usd = c === "USD";
+  $("h-usd").hidden = !usd;
+  $("h-avg-lbl").textContent = usd ? "Ostuhind $" : "Ostuhind €";
+  if (usd && !fxManual) loadFx();
+  fxHint();
+}
+async function loadFx() {
+  const date = $("h-date").value;
+  $("h-fx").placeholder = "laen…";
+  const v = await usdToEur(date);
+  if (fxManual || curPick.get() !== "USD" || $("h-date").value !== date) return;
+  if (v) $("h-fx").value = v.toFixed(4);
+  else $("h-fx").placeholder = "sisesta ise";
+  fxHint();
+}
+function fxHint() {
+  const p = +$("h-avg").value, fx = +$("h-fx").value;
+  $("h-fx-out").textContent = curPick.get() !== "USD" ? "" : p && fx ? `${fmt(p, 2)} $ × ${fmt(fx, 4)} = ${eur(p * fx)} tüki kohta` : "Kursi järgi arvutame ostuhinna eurodesse, et kasum oleks õige.";
+}
+$("h-date").addEventListener("change", () => { fxManual = false; loadFx(); });
+$("h-fx").addEventListener("input", () => { fxManual = true; fxHint(); });
+$("h-avg").addEventListener("input", fxHint);
 $("h-ticker").addEventListener("input", () => ($("h-symbol").placeholder = guessSymbol($("h-ticker").value, typePick.get()) || "arvatakse ise"));
 function openHolding(r) {
   editing = r || null; delArm = false;
@@ -323,6 +367,11 @@ function openHolding(r) {
     $("h-rate").value = r.rate ?? ""; $("h-mat").value = r.maturity || ""; $("h-nom").value = r.nominal ?? "";
     $("h-symbol").value = r.symbol || ""; $("h-manual").value = r.manualPrice ?? "";
   }
+  fxManual = !!(r && r.buyCurrency === "USD" && r.buyFx);
+  if (r && r.buyCurrency === "USD") {
+    $("h-avg").value = r.buyPrice ?? r.avgPrice; $("h-date").value = r.buyDate || ""; $("h-fx").value = r.buyFx ?? "";
+  }
+  curPick.set(r ? r.buyCurrency : "EUR");
   syncType(typePick.get());
   $("h-delete").hidden = !r; $("h-delete").textContent = "Kustuta investeering";
   openSheet(r ? (r.name || r.ticker) : "Lisa investeering", "h-form");
@@ -341,6 +390,15 @@ $("h-form").addEventListener("submit", async (e) => {
     maturity: SAFE.includes(type) && $("h-mat").value ? $("h-mat").value : null,
     nominal: type === "Võlakiri" && $("h-nom").value !== "" ? +$("h-nom").value : null,
   };
+  if (type !== "Hoius" && curPick.get() === "USD") {
+    let fx = +$("h-fx").value;
+    if (!(fx > 0)) fx = await usdToEur($("h-date").value);
+    if (!(fx > 0)) return toast("Dollari kurssi ei õnnestunud laadida. Sisesta kurss käsitsi (1 $ = ? €).");
+    const native = +$("h-avg").value;
+    Object.assign(body, { avg_price: native * fx, buy_currency: "USD", buy_price: native, buy_fx: fx, buy_date: $("h-date").value || null });
+  } else {
+    Object.assign(body, { buy_currency: "EUR", buy_price: null, buy_fx: null, buy_date: null });
+  }
   const manual = $("h-manual").value;
   if (type !== "Hoius" && manual !== "" && (!editing || +manual !== editing.manualPrice)) { body.manual_price = +manual; body.manual_price_at = new Date().toISOString(); }
   if (type !== "Hoius" && manual === "" && editing && editing.manualPrice != null) { body.manual_price = null; body.manual_price_at = null; }

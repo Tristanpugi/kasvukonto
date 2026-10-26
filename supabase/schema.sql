@@ -64,3 +64,10 @@ grant usage on schema public to authenticated, service_role;
 grant select, insert, update, delete on public.holdings, public.txns, public.settings to authenticated;
 grant select on public.prices to authenticated;
 grant all on public.holdings, public.txns, public.settings, public.prices to service_role;
+
+-- Ostu valuuta (lisatud hiljem). avg_price on alati eurodes; dollarites ostu algandmed on siin.
+alter table public.holdings
+  add column if not exists buy_currency text not null default 'EUR',
+  add column if not exists buy_price numeric,
+  add column if not exists buy_fx numeric,
+  add column if not exists buy_date date;
