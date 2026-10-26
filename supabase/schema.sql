@@ -58,3 +58,9 @@ create policy "own settings" on public.settings for all
   using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "read prices" on public.prices for select
   to authenticated using (true);
+
+-- Õigused Data API jaoks (vajalik, kui "Automatically expose new tables" on välja lülitatud).
+grant usage on schema public to authenticated, service_role;
+grant select, insert, update, delete on public.holdings, public.txns, public.settings to authenticated;
+grant select on public.prices to authenticated;
+grant all on public.holdings, public.txns, public.settings, public.prices to service_role;
