@@ -2,9 +2,14 @@
 const cfg = window.KASVUKONTO_CONFIG || {};
 const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
 
-const TYPES = ["ETF", "Aktsia", "Fond", "Võlakiri", "Hoius", "Krüpto", "Muu"];
-const TYPE_COLOR = { ETF: "#1F6B4F", Aktsia: "#3E6FA3", Fond: "#5E9C8F", Võlakiri: "#B07F22", Hoius: "#8A8F3C", Krüpto: "#8E5BA6", Muu: "#7A7F7C" };
-const SAFE = ["Võlakiri", "Hoius"], DIVERSE = ["ETF", "Fond"];
+const TYPES = ["ETF", "Aktsia", "Fond", "Pension", "Võlakiri", "Hoius", "Krüpto", "Muu"];
+const TYPE_COLOR = { ETF: "#1F6B4F", Aktsia: "#3E6FA3", Fond: "#5E9C8F", Pension: "#C0675A", Võlakiri: "#B07F22", Hoius: "#8A8F3C", Krüpto: "#8E5BA6", Muu: "#7A7F7C" };
+const SAFE = ["Võlakiri", "Hoius"], DIVERSE = ["ETF", "Fond", "Pension"];
+/* Pensionifondid, mille päevahind (NAV) tuleb Tuleva avalikust API-st. */
+const PENSION_FUNDS = [
+  { symbol: "EE3600109435", short: "TUK75", name: "Tuleva Maailma Aktsiate Pensionifond", type: "Pension", exchange: "II sammas" },
+  { symbol: "EE3600001707", short: "TUV100", name: "Tuleva III Samba Pensionifond", type: "Pension", exchange: "III sammas" },
+];
 const KIND = { dividend: "Dividend", deposit: "Sissemakse", withdraw: "Väljamakse" };
 const S = { holdings: [], trades: [], prices: {}, txns: [], config: { monthly: 300 }, hasTrades: true };
 let user = null;
@@ -34,7 +39,7 @@ function el(tag, attrs = {}, ...kids) {
 
 function guessSymbol(t, type) {
   t = up(t);
-  if (!t || t.includes(".") || t.includes("-") || t.includes("=")) return t;
+  if (!t || t.includes(".") || t.includes("-") || t.includes("=") || type === "Pension") return t;
   if (type === "Krüpto") return t + "-EUR";
   if (/1T$/.test(t)) return t + ".TL";
   if (/1R$/.test(t)) return t + ".RG";
@@ -429,7 +434,16 @@ function syncType(t) {
   $("h-more").hidden = dep;
   $("h-buy-lbl").textContent = dep ? "Sissemakse hoiusele" : "Esimene ost";
   $("h-symbol").placeholder = guessSymbol($("h-ticker").value, t) || "arvatakse ise";
-  if (!$("h-buy").hidden) { trType = t; syncTrade(); }
+  if (t === "Pension") $("h-ticker").placeholder = "nt Tuleva";
+  const pen = t === "Pension" && !editing;
+  $("h-pen").hidden = !pen;
+  $("h-pen-val").required = pen; $("h-pen-pl").required = pen;
+  if (!editing) {
+    $("h-buy").hidden = pen;
+    if (pen) $("r-slot").append($("tr-fields"));
+    else if (!$("h-buy-slot").contains($("tr-fields"))) mountTradeFields("h-buy-slot", t);
+    else { trType = t; syncTrade(); }
+  }
 }
 let searchT, searchSeq = 0, picked = null;
 function hideResults() { $("h-results").hidden = true; $("h-results").replaceChildren(); }
@@ -442,9 +456,10 @@ $("h-ticker").addEventListener("input", () => {
   if (picked || q.length < 2 || t === "Hoius") { hideResults(); return; }
   searchT = setTimeout(async () => {
     const seq = ++searchSeq;
-    const { data, error } = await sb.functions.invoke("search", { body: { q } });
+    const local = t === "Pension" || /tul|pens|samba|tuk|tuv/i.test(q) ? PENSION_FUNDS : [];
+    const { data, error } = t === "Pension" ? { data: { results: [] } } : await sb.functions.invoke("search", { body: { q } });
     if (seq !== searchSeq || picked) return;
-    const res = error ? [] : (data?.results || []).slice(0, 8);
+    const res = local.concat(error ? [] : (data?.results || [])).slice(0, 8);
     if (!res.length) { hideResults(); return; }
     $("h-results").replaceChildren(...res.map((x) => el("li", {}, el("button", { class: "res", type: "button", onclick: () => pickInstrument(x) },
       el("span", { class: "av sm", style: `background:${TYPE_COLOR[x.type] || "#888"}`, text: x.symbol.split(/[.\-]/)[0].slice(0, 4) }),
@@ -453,14 +468,14 @@ $("h-ticker").addEventListener("input", () => {
   }, 300);
 });
 function pickInstrument(x) {
-  const short = x.symbol.split(/[.\-]/)[0];
+  const short = x.short || x.symbol.split(/[.\-]/)[0];
   picked = { ...x, short };
   if (TYPES.includes(x.type)) typePick.set(x.type);
   $("h-ticker").value = short; $("h-name").value = x.name; $("h-symbol").value = x.symbol;
   if (/\.(DE|F|AS|PA|MI|TL|RG|VS|HE|BR|MC|VI|LS|IR)$/.test(x.symbol)) curPick.set("EUR");
   else if (!x.symbol.includes(".") && x.type !== "Krüpto") { curPick.set("USD"); }
   hideResults(); showPicked(x.symbol, x.exchange);
-  $("tr-qty").focus();
+  (x.type === "Pension" ? $("h-pen-val") : $("tr-qty")).focus();
 }
 function openHolding(r) {
   editing = r || null; delArm = false;
@@ -505,6 +520,7 @@ $("h-form").addEventListener("submit", async (e) => {
     if (error) return toast("Salvestamine ebaõnnestus: " + error.message);
     const id = editing.id; await loadAll(); openDetail(id); return;
   }
+  if (type === "Pension") return addPension(body);
   trType = type;
   const tv = await validTrade(); if (!tv) return;
   body.qty = 0; body.avg_price = 0;
@@ -515,6 +531,32 @@ $("h-form").addEventListener("submit", async (e) => {
   closeSheet(); await loadAll();
   if (type !== "Hoius") updatePrices(true);
 });
+/* Pensionifond: pangast turuväärtus ja kasum → osakute arv päevahinna järgi. */
+async function addPension(body) {
+  const value = +$("h-pen-val").value, pl = +$("h-pen-pl").value || 0, cost = value - pl;
+  if (!(value > 0) || !(cost > 0)) return toast("Sisesta turuväärtus ja kasum nii, nagu pangas näha.");
+  const btn = $("h-submit"); btn.disabled = true; btn.textContent = "Otsin päevahinda…";
+  try {
+    body.qty = 0; body.avg_price = 0;
+    const { data, error } = await sb.from("holdings").insert(body).select().single();
+    if (error) return toast("Salvestamine ebaõnnestus: " + error.message);
+    await sb.functions.invoke("update-prices");
+    const pr = body.symbol ? (await sb.from("prices").select("*").eq("symbol", body.symbol).maybeSingle()).data : null;
+    const nav = pr ? +pr.price : 0;
+    let trade;
+    if (nav > 0) {
+      const qty = value / nav;
+      trade = { holding_id: data.id, side: "buy", date: today(), qty, price: cost / qty, currency: "EUR", fx: 1, fee: 0 };
+    } else {
+      trade = { holding_id: data.id, side: "buy", date: today(), qty: 1, price: cost, currency: "EUR", fx: 1, fee: 0 };
+      await sb.from("holdings").update({ manual_price: value, manual_price_at: new Date().toISOString() }).eq("id", data.id);
+      toast("Päevahinda ei leitud, seega salvestasin väärtuse käsitsi. Uuenda seda aeg-ajalt: ava fond → Muuda andmeid.");
+    }
+    const r2 = await sb.from("trades").insert(trade);
+    if (r2.error) { await sb.from("holdings").delete().eq("id", data.id); return toast("Salvestamine ebaõnnestus: " + r2.error.message); }
+    closeSheet(); await loadAll();
+  } finally { btn.disabled = false; btn.textContent = "Lisa investeering"; }
+}
 $("h-delete").addEventListener("click", async () => {
   if (!delArm) { delArm = true; $("h-delete").textContent = "Vajuta uuesti, et kustutada"; return; }
   const { error } = await sb.from("holdings").delete().eq("id", editing.id);

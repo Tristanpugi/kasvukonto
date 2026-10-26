@@ -10,7 +10,18 @@ const cors = {
 
 type Quote = { price: number; currency: string };
 
+// Eesti pensionifondid (ISIN, nt EE3600109435): päevahind Tuleva avalikust API-st.
+async function pensionNav(isin: string): Promise<Quote | null> {
+  const start = new Date(Date.now() - 21 * 864e5).toISOString().slice(0, 10);
+  const res = await fetch(`https://onboarding-service.tuleva.ee/v1/funds/${isin}/nav?startDate=${start}`, { headers: { Accept: "application/json" } });
+  if (!res.ok) return null;
+  const arr = await res.json();
+  const last = Array.isArray(arr) ? arr[arr.length - 1] : null;
+  return last && typeof last.value === "number" ? { price: last.value, currency: "EUR" } : null;
+}
+
 async function quote(symbol: string): Promise<Quote | null> {
+  if (/^EE\d{10}$/.test(symbol)) return pensionNav(symbol);
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 Kasvukonto" } });
   if (!res.ok) return null;
@@ -57,7 +68,7 @@ Deno.serve(async (req) => {
       await admin.from("prices").upsert({
         symbol, price: eur, currency: "EUR",
         native_price: q.price, native_currency: q.currency,
-        updated_at: new Date().toISOString(), source: "Yahoo Finance",
+        updated_at: new Date().toISOString(), source: /^EE\d{10}$/.test(symbol) ? "Tuleva" : "Yahoo Finance",
       });
       updated.push(symbol);
     } catch (_e) {
