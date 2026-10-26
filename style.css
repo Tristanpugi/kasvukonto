@@ -177,3 +177,8 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 
 .usd-box p { margin: 0; }
 .usd-box input { background: var(--card); }
 .auth-logo { width: 84px; height: 84px; border-radius: 22px; margin-bottom: 8px; box-shadow: 0 10px 30px rgba(18,58,44,.25); }
+.results { list-style: none; margin: -6px 0 0; padding: 4px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--card); max-height: 300px; overflow-y: auto; }
+.res { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; align-items: center; width: 100%; padding: 8px; border: 0; background: none; border-radius: 10px; text-align: left; cursor: pointer; }
+.res:hover, .res:focus-visible { background: var(--soft); }
+.av.sm { width: 34px; height: 34px; border-radius: 10px; font-size: 10px; }
+.picked { margin: -6px 0 0; font-size: 13px; font-weight: 600; color: var(--accent); }

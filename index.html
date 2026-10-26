@@ -138,7 +138,9 @@
 
     <form id="h-form" hidden>
       <div class="chips" id="h-types" role="radiogroup" aria-label="Tüüp"></div>
-      <label class="field"><span id="h-ticker-lbl">Sümbol</span><input id="h-ticker" required autocomplete="off" autocapitalize="characters" placeholder="VWCE"></label>
+      <label class="field"><span id="h-ticker-lbl">Otsi nime või sümboli järgi</span><input id="h-ticker" required autocomplete="off" spellcheck="false" placeholder="nt Vanguard, LHV, Apple, Bitcoin"></label>
+      <ul class="results" id="h-results" hidden></ul>
+      <p class="picked" id="h-picked" hidden></p>
       <label class="field"><span>Nimi <i>(valikuline)</i></span><input id="h-name" placeholder="Vanguard FTSE All-World"></label>
       <div class="two">
         <label class="field"><span id="h-qty-lbl">Kogus</span><input id="h-qty" type="number" inputmode="decimal" step="any" min="0" required></label>

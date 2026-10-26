@@ -324,8 +324,8 @@ function syncType(t) {
   $("h-rate-lbl").textContent = dep ? "Intress % aastas" : "Kupong % aastas";
   $("h-mat-lbl").textContent = dep ? "Tähtaeg" : "Lunastus";
   $("h-qty-lbl").textContent = dep ? "Summa €" : "Kogus (tk)";
-  $("h-ticker-lbl").textContent = dep ? "Lühinimi" : "Sümbol";
-  $("h-ticker").placeholder = { ETF: "VWCE", Aktsia: "LHV1T", Fond: "EUNL", Võlakiri: "LHVB070033A", Hoius: "HOIUS", Krüpto: "BTC", Muu: "" }[t] || "";
+  $("h-ticker-lbl").textContent = dep ? "Lühinimi" : bond ? "Võlakirja sümbol või nimi" : "Otsi nime või sümboli järgi";
+  $("h-ticker").placeholder = dep ? "HOIUS" : bond ? "nt LHVB070033A" : { ETF: "nt Vanguard, VWCE", Aktsia: "nt LHV, Apple, Tesla", Fond: "nt iShares", Krüpto: "nt Bitcoin" }[t] || "nt Vanguard, LHV, Apple";
   $("h-avg-wrap").hidden = dep; $("h-avg").required = !dep;
   $("h-cur-row").hidden = dep; if (dep) curPick.set("EUR");
   $("h-nom-wrap").hidden = !bond; $("h-sym-wrap").hidden = dep; $("h-manual-wrap").hidden = dep;
@@ -357,10 +357,52 @@ function fxHint() {
 $("h-date").addEventListener("change", () => { fxManual = false; loadFx(); });
 $("h-fx").addEventListener("input", () => { fxManual = true; fxHint(); });
 $("h-avg").addEventListener("input", fxHint);
-$("h-ticker").addEventListener("input", () => ($("h-symbol").placeholder = guessSymbol($("h-ticker").value, typePick.get()) || "arvatakse ise"));
+$("h-ticker").addEventListener("input", () => {
+  $("h-symbol").placeholder = guessSymbol($("h-ticker").value, typePick.get()) || "arvatakse ise";
+  searchInstruments();
+});
+
+/* Väärtpaberite otsing (Yahoo Finance serveri funktsiooni kaudu) */
+let searchT, searchSeq = 0, picked = null;
+function hideResults() { $("h-results").hidden = true; $("h-results").replaceChildren(); }
+function showPicked(sym, exch) {
+  const p = $("h-picked");
+  p.textContent = `✓ ${sym}${exch ? " · " + exch : ""} · hind tuleb automaatselt`;
+  p.hidden = false;
+}
+function searchInstruments() {
+  const q = $("h-ticker").value.trim(), t = typePick.get();
+  if (picked && q !== picked.short) { picked = null; $("h-picked").hidden = true; $("h-symbol").value = ""; }
+  clearTimeout(searchT);
+  if (picked || q.length < 2 || t === "Hoius") { hideResults(); return; }
+  searchT = setTimeout(async () => {
+    const seq = ++searchSeq;
+    const { data, error } = await sb.functions.invoke("search", { body: { q } });
+    if (seq !== searchSeq || picked) return;
+    const res = error ? [] : (data?.results || []).slice(0, 8);
+    const ul = $("h-results");
+    if (!res.length) { hideResults(); return; }
+    ul.replaceChildren(...res.map((x) => el("li", {}, el("button", { class: "res", type: "button", onclick: () => pickInstrument(x) },
+      el("span", { class: "av sm", style: `background:${TYPE_COLOR[x.type] || "#888"}`, text: x.symbol.split(/[.\-]/)[0].slice(0, 4) }),
+      el("span", { class: "it-main" }, el("div", { class: "it-title", text: x.name }), el("div", { class: "it-sub", text: `${x.symbol} · ${x.exchange} · ${x.type}` }))))));
+    ul.hidden = false;
+  }, 300);
+}
+function pickInstrument(x) {
+  const short = x.symbol.split(/[.\-]/)[0];
+  picked = { ...x, short };
+  if (TYPES.includes(x.type)) typePick.set(x.type);
+  $("h-ticker").value = short;
+  $("h-name").value = x.name;
+  $("h-symbol").value = x.symbol;
+  hideResults(); showPicked(x.symbol, x.exchange);
+  $("h-qty").focus();
+}
 function openHolding(r) {
   editing = r || null; delArm = false;
   $("h-form").reset();
+  picked = null; hideResults(); $("h-picked").hidden = true;
+  if (r && r.symbol && r.type !== "Hoius") { picked = { short: r.ticker, symbol: r.symbol }; showPicked(r.symbol, ""); }
   typePick.set(r ? r.type : "ETF");
   if (r) {
     $("h-ticker").value = r.ticker; $("h-name").value = r.name || ""; $("h-qty").value = r.qty; $("h-avg").value = r.avgPrice;
