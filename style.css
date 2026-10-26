@@ -197,3 +197,4 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 
 .item.tr { grid-template-columns: 52px minmax(0, 1fr) auto; }
 .side { font: 700 10px var(--f-body); letter-spacing: .06em; text-align: center; padding: 6px 0; border-radius: 8px; background: var(--soft); color: var(--accent); }
 .side.sell { background: var(--loss-soft); color: var(--loss); }
+.sheet #p-form { display: flex; flex-direction: column; gap: 14px; }

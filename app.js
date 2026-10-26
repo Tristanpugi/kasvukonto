@@ -337,7 +337,7 @@ function renderTx() {
 }
 
 /* ---------- alumine leht ---------- */
-const PANES = ["h-form", "t-form", "d-view", "r-form"];
+const PANES = ["h-form", "t-form", "d-view", "r-form", "p-form"];
 function openSheet(title, paneId) {
   $("sheet-title").textContent = title;
   PANES.forEach((id) => ($(id).hidden = id !== paneId));
@@ -707,11 +707,28 @@ document.querySelectorAll(".tabbar button").forEach((b) => b.addEventListener("c
 /* ---------- sisselogimine ---------- */
 $("auth-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const email = $("auth-email").value.trim(); if (!email) return;
+  const email = $("auth-email").value.trim().toLowerCase(), pass = $("auth-pass").value;
+  if (!email) return;
   $("auth-btn").disabled = true;
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
+  let error, msg;
+  if (pass) {
+    ({ error } = await sb.auth.signInWithPassword({ email, password: pass }));
+    msg = error ? (/invalid/i.test(error.message) ? "Vale e-post või parool. Kui sa pole parooli veel määranud, jäta parooliväli tühjaks ja saadame lingi." : "Sisselogimine ebaõnnestus: " + error.message) : "";
+  } else {
+    ({ error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } }));
+    msg = error ? (/rate limit/i.test(error.message) ? "Liiga palju linke lühikese ajaga. Proovi tunni aja pärast või logi sisse parooliga." : "Lingi saatmine ebaõnnestus: " + error.message)
+      : `Link on teel aadressile ${email}. Ava see samas seadmes. Pärast sisselogimist määra parool (võtme ikoon üleval).`;
+  }
   $("auth-btn").disabled = false;
-  $("auth-msg").textContent = error ? "Lingi saatmine ebaõnnestus: " + error.message : `Link on teel aadressile ${email}. Ava see samas seadmes.`;
+  $("auth-msg").textContent = msg;
+});
+$("auth-pass").addEventListener("input", () => ($("auth-btn").textContent = $("auth-pass").value ? "Logi sisse" : "Saada link"));
+$("auth-btn").textContent = "Saada link";
+$("set-pass").addEventListener("click", () => { $("p-form").reset(); $("p-msg").textContent = ""; openSheet("Määra parool", "p-form"); });
+$("p-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const { error } = await sb.auth.updateUser({ password: $("p-new").value });
+  $("p-msg").textContent = error ? "Parooli salvestamine ebaõnnestus: " + error.message : `Parool salvestatud. Logi teistes seadmetes sisse aadressiga ${user.email} ja selle parooliga.`;
 });
 $("logout").addEventListener("click", () => sb.auth.signOut());
 

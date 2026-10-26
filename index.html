@@ -24,6 +24,9 @@
       <button class="icon-btn" id="refresh" type="button" aria-label="Uuenda hindu" title="Uuenda hindu">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
       </button>
+      <button class="icon-btn" id="set-pass" type="button" aria-label="Määra parool" title="Määra parool">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 9.2-9.2M17 6l3 3M14 9l2 2"/></svg>
+      </button>
       <button class="icon-btn" id="logout" type="button" aria-label="Logi välja" title="Logi välja">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
       </button>
@@ -34,9 +37,10 @@
   <form class="auth" id="auth-form" hidden>
     <img class="auth-logo" src="icons/logo.svg" alt="" width="84" height="84">
     <h1>Sinu raha, ühes kohas</h1>
-    <p class="muted">Sisesta e-post ja saadame sulle lingi. Parooli pole vaja.</p>
-    <input id="auth-email" type="email" required autocomplete="email" placeholder="sinu@email.ee" aria-label="E-post">
-    <button class="btn big" type="submit" id="auth-btn">Saada link</button>
+    <p class="muted">Logi sisse e-posti ja parooliga. Kui parooli veel pole, saadame sulle lingi.</p>
+    <input id="auth-email" type="email" required autocomplete="username" placeholder="sinu@email.ee" aria-label="E-post">
+    <input id="auth-pass" type="password" autocomplete="current-password" placeholder="Parool (kui oled selle määranud)" aria-label="Parool">
+    <button class="btn big" type="submit" id="auth-btn">Logi sisse</button>
     <p class="muted small" id="auth-msg" aria-live="polite"></p>
   </form>
 
@@ -166,6 +170,13 @@
       </details>
       <button class="btn big" type="submit" id="h-submit">Salvesta</button>
       <button class="btn ghost danger" type="button" id="h-delete" hidden>Kustuta investeering</button>
+    </form>
+
+    <form id="p-form" hidden>
+      <p class="muted small" style="margin:0">Parooliga saad edaspidi sisse logida ilma e-posti lingita, ka telefonis ja avakuva äpis.</p>
+      <input id="p-new" type="password" autocomplete="new-password" minlength="6" required placeholder="Uus parool (vähemalt 6 märki)" aria-label="Uus parool">
+      <button class="btn big" type="submit">Salvesta parool</button>
+      <p class="muted small" id="p-msg" aria-live="polite"></p>
     </form>
 
     <div id="d-view" class="dview" hidden>
