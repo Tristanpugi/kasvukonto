@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="et">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1F6B4F">
+<title>Kasvukonto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0}
+[hidden]{display:none!important}
+#app{display:flex;flex-direction:column;gap:20px}
+.head-r{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.auth{max-width:440px;margin:6vh auto 0;width:100%}
+
+/* Layout: brokerage-statement ledger. Summary strip, tab rail, one working panel per tab. */
+:root{
+  --bg:#F2F4F1; --surface:#FFFFFF; --line:#D8DED9; --muted:#5D6B64; --fg:#14211C;
+  --accent:#1F6B4F; --accent-soft:#E1EFE8; --ochre:#B07F22; --ochre-soft:#F4E9D3;
+  --loss:#B4423A; --warn-bg:#FBF1DC;
+  --f-display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-num:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E1613; --surface:#15201C; --line:#26342E; --muted:#93A39B; --fg:#E3ECE7;
+  --accent:#5FC79A; --accent-soft:#1B3329; --ochre:#D9A84E; --ochre-soft:#33291A;
+  --loss:#E7766B; --warn-bg:#2E2617; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#0E1613; --surface:#15201C; --line:#26342E; --muted:#93A39B; --fg:#E3ECE7;
+  --accent:#5FC79A; --accent-soft:#1B3329; --ochre:#D9A84E; --ochre-soft:#33291A;
+  --loss:#E7766B; --warn-bg:#2E2617; color-scheme:dark;}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.5}
+.wrap{max-width:1040px;margin:0 auto;padding-block:24px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:20px}
+header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(28px,5vw,40px);letter-spacing:-.02em;margin:0;line-height:1}
+h2{font-family:var(--f-display);font-weight:500;font-size:20px;margin:0;text-wrap:balance}
+.sub{color:var(--muted);font-size:13px}
+.num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.gain{color:var(--accent)} .loss{color:var(--loss)}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:2px solid var(--fg);border-bottom:1px solid var(--line)}
+.kpi{padding:14px 16px 14px 0;display:flex;flex-direction:column;gap:4px;min-width:0}
+.kpi+.kpi{padding-left:16px;border-left:1px solid var(--line)}
+.kpi .v{font-family:var(--f-num);font-size:clamp(18px,2.6vw,26px);font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:640px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.kpi:nth-child(3){border-left:0;padding-left:0}.kpi:nth-child(n+3){border-top:1px solid var(--line)}}
+nav.tabs{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--line)}
+nav.tabs button{font:600 14px var(--f-body);background:none;border:0;color:var(--muted);padding:10px 14px;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
+nav.tabs button[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--accent)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.panel{display:flex;flex-direction:column;gap:20px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:18px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.grid2{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:20px}
+@media (max-width:820px){.grid2{grid-template-columns:minmax(0,1fr)}}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:500;flex:1 1 120px;min-width:0}
+input,select{font:15px var(--f-body);color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;min-width:0}
+input[type=number]{font-family:var(--f-num)}
+.btn{font:600 14px var(--f-body);border-radius:6px;padding:9px 14px;border:1px solid var(--accent);background:var(--accent);color:var(--bg);cursor:pointer;white-space:nowrap}
+.btn.ghost{background:transparent;color:var(--fg);border-color:var(--line)}
+.btn.sm{padding:4px 9px;font-size:12px}
+.btn.danger{border-color:var(--loss);color:var(--loss);background:transparent}
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px;border-bottom:1px solid var(--line);vertical-align:middle}
+td.r,th.r{text-align:right}
+td.num{white-space:nowrap}
+.tk{font-family:var(--f-num);font-weight:500}
+.chip{display:inline-block;font-size:11px;padding:2px 7px;border-radius:99px;background:var(--accent-soft);color:var(--accent);font-weight:600;white-space:nowrap}
+.chip.old{background:var(--ochre-soft);color:var(--ochre)}
+.chip.ex{background:var(--ochre-soft);color:var(--ochre)}
+.alloc{display:flex;height:14px;border-radius:4px;overflow:hidden;background:var(--line)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.notice{background:var(--warn-bg);border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.empty{color:var(--muted);font-size:14px;padding:18px 0}
+.big{font-family:var(--f-num);font-size:30px;font-weight:500;font-variant-numeric:tabular-nums}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stats div{display:flex;flex-direction:column;gap:2px}
+.stats .num{font-size:18px}
+svg text{fill:var(--muted);font:11px var(--f-num)}
+.actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.pinput{width:90px;padding:4px 6px;font-size:13px}
+.checks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.checks li{display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:start;font-size:14px;padding:10px 12px;border-radius:6px;background:var(--bg)}
+.checks li::before{content:"";width:8px;height:8px;border-radius:50%;margin-top:7px;background:var(--muted)}
+.checks li.warn::before{background:var(--loss)} .checks li.info::before{background:var(--ochre)} .checks li.ok::before{background:var(--accent)}
+footer{color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:14px;max-width:70ch}
+@media (prefers-reduced-motion:no-preference){.alloc span{transition:flex-basis .4s ease}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="lbl">Isiklik investeerimisvaade</div>
+      <h1>Kasvukonto</h1>
+    </div>
+    <div class="head-r" id="app-head" hidden>
+      <span class="sub" id="freshness"></span>
+      <button class="btn sm" type="button" id="refresh">Uuenda hindu</button>
+      <span class="sub" id="who"></span>
+      <button class="btn sm ghost" type="button" id="logout">Logi välja</button>
+    </div>
+  </header>
+
+  <form class="card auth" id="auth-form" hidden>
+    <h2>Logi sisse</h2>
+    <p class="sub" style="margin:0">Sisesta oma e-post. Saadame lingi, millega pääsed oma portfelli juurde ilma paroolita.</p>
+    <label class="f">E-post<input id="auth-email" type="email" required autocomplete="email" placeholder="nimi@näide.ee"></label>
+    <button class="btn" type="submit" id="auth-btn">Saada sisselogimislink</button>
+    <div class="sub" id="auth-msg" aria-live="polite"></div>
+  </form>
+
+  <div id="app" hidden>
+
+  <section class="kpis" aria-label="Kokkuvõte">
+    <div class="kpi"><span class="lbl">Portfelli väärtus</span><span class="v" id="k-value">–</span></div>
+    <div class="kpi"><span class="lbl">Investeeritud</span><span class="v" id="k-cost">–</span></div>
+    <div class="kpi"><span class="lbl">Kasum / kahjum</span><span class="v" id="k-pl">–</span></div>
+    <div class="kpi"><span class="lbl">Dividendid sel aastal</span><span class="v" id="k-div">–</span></div>
+  </section>
+
+
+  <div class="notice" id="db-notice" hidden>Andmebaas pole selles vaates saadaval. Saad äppi proovida, aga muudatused ei salvestu.</div>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="portfell" aria-selected="true">Portfell</button>
+    <button role="tab" data-tab="plaan" aria-selected="false">Kuuplaan</button>
+    <button role="tab" data-tab="kalkulaator" aria-selected="false">Liitintress</button>
+    <button role="tab" data-tab="tulu" aria-selected="false">Dividendid ja sissemaksed</button>
+  </nav>
+
+  <!-- PORTFELL -->
+  <section class="panel" data-panel="portfell">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center"><h2>Jaotus</h2><span class="sub" id="alloc-sub"></span></div>
+      <div class="alloc" id="alloc"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="card">
+      <h2>Portfelli tervis</h2>
+      <div class="stats">
+        <div><span class="lbl">Kogutootlus koos dividendidega</span><span class="num" id="hl-total">–</span></div>
+        <div><span class="lbl">Madalama riskiga osa</span><span class="num" id="hl-safe">–</span></div>
+        <div><span class="lbl">Intressi- ja kupongitulu aastas</span><span class="num gain" id="hl-income">–</span></div>
+      </div>
+      <ul class="checks" id="hl-list"></ul>
+      <div class="sub">Need on üldised reeglid riskide märkamiseks, mitte isiklik investeerimissoovitus.</div>
+    </div>
+    <div class="card">
+      <h2>Positsioonid</h2>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Väärtpaber</th><th class="r">Kogus</th><th class="r">Ostuhind</th><th class="r">Hind</th><th class="r">Väärtus</th><th class="r">Tulu</th><th class="r">Osakaal</th><th></th></tr></thead>
+          <tbody id="h-body"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="h-empty" hidden>Positsioone veel pole. Lisa esimene allolevast vormist, näiteks VWCE või LHV1T.</div>
+    </div>
+    <form class="card" id="h-form">
+      <h2 id="h-form-title">Lisa positsioon</h2>
+      <div class="row">
+        <label class="f">Sümbol<input id="h-ticker" required placeholder="VWCE" autocomplete="off"></label>
+        <label class="f" id="h-sym-wrap">Hinnaallika sümbol<input id="h-symbol" placeholder="VWCE.DE" autocomplete="off"></label>
+        <label class="f" style="flex-basis:200px">Nimi<input id="h-name" placeholder="Vanguard FTSE All-World"></label>
+        <label class="f">Tüüp<select id="h-type"><option>ETF</option><option>Aktsia</option><option>Fond</option><option>Võlakiri</option><option>Hoius</option><option>Krüpto</option><option>Muu</option></select></label>
+      </div>
+      <div class="row" id="h-extra" hidden>
+        <label class="f" id="h-nom-wrap">Nominaal € (1 tk)<input id="h-nom" type="number" step="any" min="0" placeholder="1000"></label>
+        <label class="f"><span id="h-rate-lbl">Kupong % aastas</span><input id="h-rate" type="number" step="any" min="0" placeholder="6"></label>
+        <label class="f"><span id="h-mat-lbl">Lunastus</span><input id="h-mat" type="date"></label>
+      </div>
+      <div class="row">
+        <label class="f"><span id="h-qty-lbl">Kogus</span><input id="h-qty" type="number" step="any" min="0" required placeholder="12"></label>
+        <label class="f" id="h-avg-wrap">Keskmine ostuhind €<input id="h-avg" type="number" step="any" min="0" required placeholder="150.00"></label>
+        <label class="f">Sihtosakaal %<input id="h-target" type="number" step="any" min="0" max="100" placeholder="60"></label>
+        <div class="row" style="flex:0 0 auto">
+          <button class="btn ghost" type="button" id="h-cancel" hidden>Loobu</button>
+          <button class="btn" type="submit" id="h-submit">Lisa</button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <!-- KUUPLAAN -->
+  <section class="panel" data-panel="plaan" hidden>
+    <div class="card">
+      <h2>Kuhu selle kuu raha panna</h2>
+      <p class="sub" style="margin:0">Arvutab, kui palju igasse positsiooni osta, et portfell liiguks sihtosakaalude poole ilma midagi müümata. Sihtosakaalud määrad portfelli vormis.</p>
+      <div class="row">
+        <label class="f" style="flex:0 1 220px">Igakuine summa €<input id="p-monthly" type="number" min="0" step="any"></label>
+        <button class="btn ghost" id="p-save" type="button">Salvesta summa</button>
+      </div>
+      <div class="notice" id="p-warn" hidden></div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Väärtpaber</th><th class="r">Praegu</th><th class="r">Siht</th><th class="r">Pärast ostu</th><th class="r">Osta €</th><th class="r">≈ tk</th></tr></thead>
+          <tbody id="p-body"></tbody>
+        </table>
+      </div>
+      <div class="sub" id="p-foot"></div>
+    </div>
+  </section>
+
+  <!-- KALKULAATOR -->
+  <section class="panel" data-panel="kalkulaator" hidden>
+    <div class="grid2">
+      <div class="card">
+        <h2>Kasvu prognoos</h2>
+        <div id="chart" style="width:100%"></div>
+        <div class="legend"><span><i style="background:var(--ochre)"></i>Sissemaksed</span><span><i style="background:var(--accent)"></i>Portfell koos tootlusega</span></div>
+      </div>
+      <div class="card">
+        <div class="row">
+          <label class="f">Algsumma €<input id="c-start" type="number" min="0" step="any"></label>
+          <label class="f">Kuumakse €<input id="c-monthly" type="number" min="0" step="any"></label>
+        </div>
+        <div class="row">
+          <label class="f">Aastane tootlus %<input id="c-rate" type="number" step="0.1" value="7"></label>
+          <label class="f">Aastaid<input id="c-years" type="number" min="1" max="60" value="20"></label>
+        </div>
+        <label class="f">Kuumakse kasv aastas %<input id="c-grow" type="number" step="0.5" value="0"></label>
+        <div><div class="lbl">Lõppväärtus</div><div class="big" id="c-final">–</div></div>
+        <div class="stats">
+          <div><span class="lbl">Sisse makstud</span><span class="num" id="c-paid">–</span></div>
+          <div><span class="lbl">Tootlus kokku</span><span class="num gain" id="c-gain">–</span></div>
+        </div>
+        <div class="row">
+          <label class="f">Eesmärk €<input id="c-goal" type="number" min="0" step="any" value="100000"></label>
+        </div>
+        <div class="sub" id="c-goal-out"></div>
+      </div>
+    </div>
+    <p class="sub" style="margin:0">Aktsiaturu pikaajaline keskmine tootlus on ajalooliselt olnud umbes 6–8% aastas, kuid üksikud aastad kõiguvad tugevalt. Prognoos ei arvesta inflatsiooni, tasusid ega makse.</p>
+  </section>
+
+  <!-- TULU -->
+  <section class="panel" data-panel="tulu" hidden>
+    <div class="card">
+      <h2>Aastate kaupa</h2>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Aasta</th><th class="r">Dividendid</th><th class="r">Sissemaksed</th><th class="r">Väljamaksed</th><th class="r">Neto sisse</th></tr></thead>
+          <tbody id="y-body"></tbody>
+        </table>
+      </div>
+      <div class="sub" id="y-yield"></div>
+    </div>
+    <form class="card" id="t-form">
+      <h2>Lisa kanne</h2>
+      <div class="row">
+        <label class="f">Kuupäev<input id="t-date" type="date" required></label>
+        <label class="f">Liik<select id="t-kind"><option value="dividend">Dividend</option><option value="deposit">Sissemakse</option><option value="withdraw">Väljamakse</option></select></label>
+        <label class="f">Sümbol<input id="t-ticker" placeholder="LHV1T" autocomplete="off"></label>
+        <label class="f">Summa €<input id="t-amount" type="number" step="any" min="0" required></label>
+        <label class="f" style="flex-basis:180px">Märkus<input id="t-note" placeholder="valikuline"></label>
+        <button class="btn" type="submit">Lisa</button>
+      </div>
+    </form>
+    <div class="card">
+      <h2>Kanded</h2>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Kuupäev</th><th>Liik</th><th>Sümbol</th><th class="r">Summa</th><th>Märkus</th><th></th></tr></thead>
+          <tbody id="t-body"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="t-empty" hidden>Kandeid pole. Lisa dividendid ja sissemaksed, et näha aastate kokkuvõtet.</div>
+    </div>
+  </section>
+
+  <footer>Kasvukonto on arvutus- ja jälgimisvahend, mitte investeerimisnõuanne. Hinnad tulevad Yahoo Finance'ist, võivad olla viivitusega ja teisendatakse eurodesse; kontrolli enne tehingut hinda oma maaklerist. Hinnaallika sümbol: Xetra ETF-id lõpuga .DE (VWCE.DE), Tallinna börs .TL (LHV1T.TL), krüpto nt BTC-EUR.</footer>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
